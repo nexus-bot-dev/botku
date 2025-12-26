@@ -76,6 +76,8 @@ server_app() {
     echo -e "       ${green}•${neutral} server addsaldo user"
     echo -e "       ${green}•${neutral} server ceksaldo user"
     echo -e "${orange}─────────────────────────────────────────${neutral}"
+    
+    # Input yang masih diperlukan
     read -p "Masukkan token bot: " token
     while [ -z "$token" ]; do
         read -p "Masukkan token bot: " token
@@ -83,36 +85,21 @@ server_app() {
             echo -e "${red}Token bot tidak boleh kosong. Silakan coba lagi.${neutral}"
         fi
     done
+
     while [ -z "$adminid" ]; do
         read -p "Masukkan admin ID: " adminid
         if [ -z "$adminid" ]; then
             echo -e "${red}Admin ID tidak boleh kosong. Silakan coba lagi.${neutral}"
         fi
     done
+
     while [ -z "$namastore" ]; do
         read -p "Masukkan nama store: " namastore
         if [ -z "$namastore" ]; then
             echo -e "${red}Nama store tidak boleh kosong. Silakan coba lagi.${neutral}"
         fi
     done
-    while [ -z "$dataqris" ]; do
-        read -p "Masukkan DATA QRIS: " dataqris
-        if [ -z "$dataqris" ]; then
-            echo -e "${red}DATA QRIS tidak boleh kosong. Silakan coba lagi.${neutral}"
-        fi
-    done
-    while [ -z "$username_orkut" ]; do
-        read -p "Masukkan USERNAME ORDERKUOTA: " username_orkut
-        if [ -z "$username_orkut" ]; then
-            echo -e "${red}USERNAME ORDERKUOTA tidak boleh kosong. Silakan coba lagi.${neutral}"
-        fi
-    done
-    while [ -z "$auth_token" ]; do
-        read -p "Masukkan AUTH TOKEN: " auth_token
-        if [ -z "$auth_token" ]; then
-            echo -e "${red}AUTH TOKEN tidak boleh kosong. Silakan coba lagi.${neutral}"
-        fi
-    done
+
     while [ -z "$groupid" ]; do
         read -p "Masukkan GROUP ID (ID grup Telegram, contoh: -1001234567890): " groupid
         if [ -z "$groupid" ]; then
@@ -120,12 +107,12 @@ server_app() {
         fi
     done
     
-    # Update path ke /root/botku
+    # Update path ke /root/botku dan hapus variable QRIS lama dari .vars.json
     rm -f /root/botku/.vars.json
-    echo "{\n  \"BOT_TOKEN\": \"$token\",\n  \"USER_ID\": \"$adminid\",\n  \"NAMA_STORE\": \"$namastore\",\n  \"GROUP_ID\": \"$groupid\",\n  \"PORT\": \"6969\",\n  \"DATA_QRIS\": \"$dataqris\",\n  \"USERNAME_ORKUT\": \"$username_orkut\",\n  \"AUTH_TOKEN\": \"$auth_token\"\n}" >/root/botku/.vars.json
+    echo "{\n  \"BOT_TOKEN\": \"$token\",\n  \"USER_ID\": \"$adminid\",\n  \"NAMA_STORE\": \"$namastore\",\n  \"GROUP_ID\": \"$groupid\",\n  \"PORT\": \"6969\"\n}" >/root/botku/.vars.json
 
-    # Update nama service pm2 jadi 'botku' dan path folder
-    pm2 start /root/botku/app.js --name botku --env production -- --token "$token" --adminid "$adminid" --namastore "$namastore" --dataqris "$dataqris" --username_orkut "$username_orkut" --auth_token "$auth_token"
+    # Update nama service pm2 jadi 'botku' dan hapus argument yang tidak perlu
+    pm2 start /root/botku/app.js --name botku --env production -- --token "$token" --adminid "$adminid" --namastore "$namastore"
     pm2 save
 
     printf "\033[5A\033[0J"
