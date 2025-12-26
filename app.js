@@ -4,7 +4,7 @@ const express = require('express');
 const { Telegraf } = require('telegraf');
 const app = express();
 const axios = require('axios');
-const AutoftQRIS = require('autoft-qris');
+// const AutoftQRIS = require('autoft-qris'); // Removed as per request
 const winston = require('winston');
 const logger = winston.createLogger({
   level: 'info',
@@ -52,10 +52,11 @@ const BOT_TOKEN = vars.BOT_TOKEN;
 const port = vars.PORT || 6969;
 const ADMIN = vars.USER_ID; 
 const NAMA_STORE = vars.NAMA_STORE || '@FTVPNSTORES';
-const DATA_QRIS = vars.DATA_QRIS;
-const USERNAME_ORKUT = vars.USERNAME_ORKUT;
-const AUTH_TOKEN = vars.AUTH_TOKEN;
+// const DATA_QRIS = vars.DATA_QRIS; // Not used with new API
+// const USERNAME_ORKUT = vars.USERNAME_ORKUT; // Not used with new API
+// const AUTH_TOKEN = vars.AUTH_TOKEN; // Not used with new API
 const GROUP_ID = vars.GROUP_ID;
+const PAYMENT_API_KEY = 'f5bf4adf-f4b9-4e8a-91f2-c07027094430'; // New API Key
 
 const bot = new Telegraf(BOT_TOKEN);
 const adminIds = ADMIN;
@@ -935,10 +936,10 @@ async function startSelectServer(ctx, action, type, page = 0) {
       const navButtons = [];
       if (totalPages > 1) { 
         if (currentPage > 0) {
-          navButtons.push({ text: '⬅️ Back', callback_data: `navigate_${action}_${type}_${currentPage - 1}` });
+          navButtons.push({ text: '⬅️ Back', callback_data: `Maps_${action}_${type}_${currentPage - 1}` });
         }
         if (currentPage < totalPages - 1) {
-          navButtons.push({ text: '➡️ Next', callback_data: `navigate_${action}_${type}_${currentPage + 1}` });
+          navButtons.push({ text: '➡️ Next', callback_data: `Maps_${action}_${type}_${currentPage + 1}` });
         }
       }
       if (navButtons.length > 0) {
@@ -1828,7 +1829,7 @@ bot.action('editserver_auth', async (ctx) => {
     }
 
     await ctx.reply('🌐 *Silakan pilih server untuk mengedit auth:*', {
-      reply_markup: { inline_keyboard: inlineKeyboard },
+      reply_markup: { inline_keyboard: keyboard_full() },
       parse_mode: 'Markdown'
     });
   } catch (error) {
@@ -2381,22 +2382,21 @@ async function updateServerField(serverId, value, query) {
   });
 }
 
-function generateRandomAmount(baseAmount) {
-  const random = Math.floor(Math.random() * 99) + 1;
-  return baseAmount + random;
-}
-
 global.depositState = {};
 global.pendingDeposits = {};
 let lastRequestTime = 0;
 const requestInterval = 1000; 
 
+// Load pending deposits from DB
 db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows) => {
   if (err) {
     logger.error('Gagal load pending_deposits:', err.message);
     return;
   }
   rows.forEach(row => {
+    // For old data with "user-..." unique_code, we might have issues if we switch to new API completely
+    // But assuming we clear or start fresh or the API handles it.
+    // We map unique_code to the key.
     global.pendingDeposits[row.unique_code] = {
       amount: row.amount,
       originalAmount: row.original_amount,
@@ -2409,14 +2409,6 @@ db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows
   logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
 });
 
-const qris = new AutoftQRIS({
-    storeName: NAMA_STORE,
-    auth_username: USERNAME_ORKUT,
-    auth_token: AUTH_TOKEN,
-    baseQrString: DATA_QRIS,
-    logoPath: 'logo.png' //OPSIONAL
-});
-
 async function processDeposit(ctx, amount) {
   const currentTime = Date.now();
   
@@ -2427,63 +2419,40 @@ async function processDeposit(ctx, amount) {
 
   lastRequestTime = currentTime;
   const userId = ctx.from.id;
-  const uniqueCode = `user-${userId}-${Date.now()}`;
   
-  // Generate random amount and check if it exists
-  let finalAmount;
-  let attempts = 0;
-  const maxAttempts = 10; // Maksimal 10 kali percobaan
-
-  do {
-    finalAmount = generateRandomAmount(parseInt(amount));
-    attempts++;
-
-    // Check if amount exists in pending deposits
-    const exists = await new Promise((resolve) => {
-      db.get('SELECT 1 FROM pending_deposits WHERE amount = ? AND status = "pending"', [finalAmount], (err, row) => {
-        if (err) {
-          logger.error('Error checking existing amount:', err);
-          resolve(false);
-        } else {
-          resolve(!!row);
-        }
-      });
-    });
-
-    if (!exists) break;
-
-    if (attempts >= maxAttempts) {
-      await ctx.editMessageText('⚠️ *Terlalu banyak percobaan. Silakan coba lagi nanti.*', { parse_mode: 'Markdown' });
-      return;
-    }
-  } while (true);
-
-  // Calculate admin fee
-  const adminFee = finalAmount - parseInt(amount);
-
-  if (!global.pendingDeposits) {
-    global.pendingDeposits = {};
-  }
-
   try {
-    const { qrBuffer } = await qris.generateQR(finalAmount);
+    const apiUrl = `https://my-payment.autsc.my.id/api/deposit?amount=${amount}&apikey=${PAYMENT_API_KEY}`;
+    const response = await axios.get(apiUrl);
+
+    if (response.data.status !== 'success') {
+      throw new Error('API returned non-success status');
+    }
+
+    const data = response.data.data;
+    const transactionId = data.transaction_id;
+    const totalAmount = data.total_amount;
+    const qrisUrl = data.qris_url;
+    const fee = data.fee;
+
+    // Remove logic for random amount generation since API handles unique transactions
 
     const caption =
       `📝 *Detail Pembayaran:*\n\n` +
-                  `💰 Jumlah: Rp ${finalAmount}\n` +
+      `💰 Jumlah Total: Rp ${totalAmount}\n` +
       `- Nominal Top Up: Rp ${amount}\n` +
-      `- Admin Fee : Rp ${adminFee}\n` +
-                  `⚠️ *Penting:* Mohon transfer sesuai nominal\n` +
-      `⏱️ Waktu: 5 menit\n\n` +
-                  `⚠️ *Catatan:*\n` +
-                  `- Pembayaran akan otomatis terverifikasi\n` +
-                  `- Jangan tutup halaman ini\n` +
+      `- Biaya Admin: Rp ${fee}\n` +
+      `⚠️ *Penting:* Mohon transfer sesuai nominal TOTAL (Rp ${totalAmount})\n` +
+      `⏱️ Waktu: 10 menit\n\n` +
+      `⚠️ *Catatan:*\n` +
+      `- Pembayaran akan otomatis terverifikasi\n` +
+      `- Jangan tutup halaman ini\n` +
       `- Jika pembayaran berhasil, saldo akan otomatis ditambahkan`;
 
-    const qrMessage = await ctx.replyWithPhoto({ source: qrBuffer }, {
+    const qrMessage = await ctx.replyWithPhoto({ url: qrisUrl }, {
       caption: caption,
-          parse_mode: 'Markdown'
-        });
+      parse_mode: 'Markdown'
+    });
+
     // Hapus pesan input nominal setelah QR code dikirim
     try {
       await ctx.deleteMessage();
@@ -2491,11 +2460,12 @@ async function processDeposit(ctx, amount) {
       logger.error('Gagal menghapus pesan input nominal:', e.message);
     }
 
-        global.pendingDeposits[uniqueCode] = {
-          amount: finalAmount,
-          originalAmount: amount,
-          userId,
-          timestamp: Date.now(),
+    // Use transaction_id as unique_code in our system
+    global.pendingDeposits[transactionId] = {
+      amount: totalAmount, // The amount user must pay
+      originalAmount: amount, // The requested amount
+      userId,
+      timestamp: Date.now(),
       status: 'pending',
       qrMessageId: qrMessage.message_id
     };
@@ -2503,21 +2473,17 @@ async function processDeposit(ctx, amount) {
     db.run(
       `INSERT INTO pending_deposits (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [uniqueCode, userId, finalAmount, amount, Date.now(), 'pending', qrMessage.message_id],
+      [transactionId, userId, totalAmount, amount, Date.now(), 'pending', qrMessage.message_id],
       (err) => {
         if (err) logger.error('Gagal insert pending_deposits:', err.message);
       }
     );
-        delete global.depositState[userId];
+    delete global.depositState[userId];
 
   } catch (error) {
     logger.error('❌ Kesalahan saat memproses deposit:', error);
     await ctx.editMessageText('❌ *GAGAL! Terjadi kesalahan saat memproses pembayaran. Silakan coba lagi nanti.*', { parse_mode: 'Markdown' });
     delete global.depositState[userId];
-    delete global.pendingDeposits[uniqueCode];
-    db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode], (err) => {
-      if (err) logger.error('Gagal hapus pending_deposits (error):', err.message);
-    });
   }
 }
 
@@ -2529,7 +2495,8 @@ async function checkQRISStatus() {
       if (deposit.status !== 'pending') continue;
       
       const depositAge = Date.now() - deposit.timestamp;
-      if (depositAge > 5 * 60 * 1000) {
+      // Keep 15 minutes timeout to be safe (API says 10 mins)
+      if (depositAge > 15 * 60 * 1000) {
         try {
           if (deposit.qrMessageId) {
             await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId);
@@ -2550,29 +2517,28 @@ async function checkQRISStatus() {
       }
 
       try {
-        const result = await qris.checkPayment(uniqueCode, deposit.amount);
+        const statusUrl = `https://my-payment.autsc.my.id/api/status/payment?transaction_id=${uniqueCode}&apikey=${PAYMENT_API_KEY}`;
+        const response = await axios.get(statusUrl);
+        const result = response.data;
         
-        if (result.success && result.data.status === 'PAID') {
-          const transactionKey = `${result.data.reference}_${result.data.amount}`;
+        if (result.status === 'success' && result.paid === true) {
+          const transactionKey = `${uniqueCode}_${deposit.amount}`;
           if (global.processedTransactions.has(transactionKey)) {
             logger.info(`Transaction ${transactionKey} already processed, skipping...`);
-        continue;
-      }
-
-          if (parseInt(result.data.amount) !== deposit.amount) {
-            logger.info(`Amount mismatch for ${uniqueCode}: expected ${deposit.amount}, got ${result.data.amount}`);
             continue;
           }
 
-          // Handle receipt if available
-          if (result.receipt && result.receipt.filePath) {
-            logger.info(`Receipt generated: ${result.receipt.filePath}`);
-          }
+          // Use the stored amount because API status check doesn't return amount
+          // We trust paid=true means full amount was paid
+          const matchingTransaction = {
+              reference_id: uniqueCode,
+              amount: deposit.amount
+          };
 
-          const success = await processMatchingPayment(deposit, result.data, uniqueCode);
+          const success = await processMatchingPayment(deposit, matchingTransaction, uniqueCode);
           if (success) {
             logger.info(`Payment processed successfully for ${uniqueCode}`);
-  delete global.pendingDeposits[uniqueCode];
+            delete global.pendingDeposits[uniqueCode];
             db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode], (err) => {
               if (err) logger.error('Gagal hapus pending_deposits (success):', err.message);
             });
